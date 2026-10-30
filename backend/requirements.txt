@@ -1,1 +1,4 @@
 eth-hash[pycryptodome]>=0.7,<1
+fastapi>=0.110,<1
+httpx>=0.27,<1
+uvicorn>=0.29,<1

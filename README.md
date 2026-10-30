@@ -4,10 +4,10 @@ VeriAnchor is a local-first tool for checking the integrity of batches of
 records. The goal is to create a signed batch, build a Merkle proof for each
 record, and verify the batch root locally or against a local EVM chain.
 
-The project is being built in stages. The initial backend increment provides
-sorted-pair Keccak-256 Merkle roots and per-record proofs. The contract, API,
-dashboard, and local launch workflow will follow as they are implemented and
-tested.
+The project is being built in stages. The backend now creates persistent local
+batches, builds sorted-pair Keccak-256 Merkle roots and per-record proofs, and
+verifies submitted records against a saved batch. The contract and dashboard
+will follow as they are implemented and tested.
 
 ## Design goals
 
@@ -26,6 +26,12 @@ Hardhat JSON-RPC endpoint at `http://127.0.0.1:8545`.
 This is an early-stage project. Features will be added in small, verifiable
 steps; the README will be updated as each part is ready to use.
 
-The Python Merkle engine is in `backend/app/crypto_engine.py`. Install its
-dependency with `python3 -m pip install -r backend/requirements.txt`, then run
-its tests with `python3 -m unittest discover -s backend/tests -t backend`.
+The FastAPI service is in `backend/app/main.py`; SQLite data is stored at
+`~/.verianchor/verianchor.sqlite3` by default. Override the database location
+with `VERIANCHOR_DB_PATH`. Install dependencies with
+`python3 -m pip install -r backend/requirements.txt`, run the API locally with
+`uvicorn app.main:app --app-dir backend --reload`, and run tests with
+`python3 -m unittest discover -s backend/tests -t backend`.
+
+The API exposes `POST /batches`, `GET /batches/{id}`,
+`GET /batches/{id}/proof/{index}`, and `POST /batches/{id}/verify`.
