@@ -1,4 +1,3 @@
-import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -6,20 +5,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional, Sequence
 
-from app.crypto_engine import build_merkle_tree
+from app.crypto_engine import (
+    build_merkle_tree,
+    canonical_record,
+    sign_root,
+)
 
 
 def encode_record(record: Any) -> str:
-    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return canonical_record(record)
 
 
 class BatchStore:
-    def __init__(self, database_path: str) -> None:
+    def __init__(self, database_path: str, signing_key: str) -> None:
         self.database_path = (
             database_path
             if database_path == ":memory:"
             else str(Path(database_path).expanduser())
         )
+        self.signing_key = signing_key
         if database_path != ":memory:":
             Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as connection:
@@ -29,10 +33,20 @@ class BatchStore:
                     id TEXT PRIMARY KEY,
                     root TEXT NOT NULL,
                     record_count INTEGER NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    signer TEXT,
+                    signature TEXT
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(batches)")
+            }
+            if "signer" not in columns:
+                connection.execute("ALTER TABLE batches ADD COLUMN signer TEXT")
+            if "signature" not in columns:
+                connection.execute("ALTER TABLE batches ADD COLUMN signature TEXT")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS batch_records (
@@ -64,17 +78,31 @@ class BatchStore:
         root, _ = build_merkle_tree(
             [record.encode("utf-8") for record in encoded_records]
         )
+        signer, signature = sign_root(root, self.signing_key)
         batch = {
             "id": str(uuid.uuid4()),
             "root": root.hex(),
             "record_count": len(encoded_records),
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "signer": signer,
+            "signature": signature,
         }
 
         with self._connection() as connection:
             connection.execute(
-                "INSERT INTO batches (id, root, record_count, created_at) VALUES (?, ?, ?, ?)",
-                (batch["id"], batch["root"], batch["record_count"], batch["created_at"]),
+                """
+                INSERT INTO batches
+                    (id, root, record_count, created_at, signer, signature)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    batch["id"],
+                    batch["root"],
+                    batch["record_count"],
+                    batch["created_at"],
+                    signer,
+                    signature,
+                ),
             )
             connection.executemany(
                 "INSERT INTO batch_records (batch_id, position, record_json) VALUES (?, ?, ?)",
@@ -86,10 +114,24 @@ class BatchStore:
 
         return batch
 
+    def list_batches(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, root, record_count, created_at, signer, signature
+                FROM batches ORDER BY created_at DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_batch(self, batch_id: str) -> Optional[dict[str, Any]]:
         with self._connection() as connection:
             row = connection.execute(
-                "SELECT id, root, record_count, created_at FROM batches WHERE id = ?",
+                """
+                SELECT id, root, record_count, created_at, signer, signature
+                FROM batches WHERE id = ?
+                """,
                 (batch_id,),
             ).fetchone()
         return dict(row) if row else None

@@ -1,6 +1,14 @@
 import unittest
 
-from app.crypto_engine import build_merkle_tree, hash_leaf, verify_proof
+from eth_account import Account
+
+from app.crypto_engine import (
+    build_merkle_tree,
+    hash_leaf,
+    sign_root,
+    verify_proof,
+    verify_root_signature,
+)
 
 
 class MerkleTreeTests(unittest.TestCase):
@@ -29,6 +37,17 @@ class MerkleTreeTests(unittest.TestCase):
     def test_empty_tree_is_rejected(self):
         with self.assertRaises(ValueError):
             build_merkle_tree([])
+
+    def test_root_signature_can_be_verified_and_rejects_another_root(self):
+        account = Account.create()
+        root, _ = build_merkle_tree([b"signed"])
+        signer, signature = sign_root(root, account.key.hex())
+
+        self.assertEqual(signer.lower(), account.address.lower())
+        self.assertTrue(verify_root_signature(root, signer, signature))
+        self.assertFalse(
+            verify_root_signature(hash_leaf(b"other"), signer, signature)
+        )
 
 
 if __name__ == "__main__":
